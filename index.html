@@ -157,10 +157,14 @@ tailwind.config = { darkMode: 'class' }
 
 <!-- Version & Changelog Tooltip -->
 <div class="fixed bottom-4 right-4 z-50 group">
-  <span class="text-xs text-slate-600 cursor-help select-none">v1.1.0</span>
+  <span class="text-xs text-slate-600 cursor-help select-none">v1.2.0</span>
   <div class="absolute bottom-6 right-0 hidden group-hover:block bg-slate-800 border border-slate-700 p-4 rounded-lg shadow-xl w-72 text-xs text-slate-300 transition-opacity duration-200 opacity-0 group-hover:opacity-100">
     <div class="font-bold mb-2 text-slate-100 border-b border-slate-700 pb-2">Changelog</div>
     <ul class="space-y-2">
+      <li>
+        <span class="text-indigo-400 font-medium">v1.2.0</span> 
+        <p class="text-slate-400 mt-0.5">Fixed Anna's Archive HTML parser for new layout. Reordered proxies. Forced LibGen to .is domain.</p>
+      </li>
       <li>
         <span class="text-indigo-400 font-medium">v1.1.0</span> 
         <p class="text-slate-400 mt-0.5">Added Debug Console for logging proxy and fetch errors. Added more proxy fallbacks.</p>
@@ -168,22 +172,6 @@ tailwind.config = { darkMode: 'class' }
       <li>
         <span class="text-indigo-400 font-medium">v1.0.4</span> 
         <p class="text-slate-400 mt-0.5">Added version badge & hover changelog. Improved HTML text parsing for better metadata extraction.</p>
-      </li>
-      <li>
-        <span class="text-indigo-400 font-medium">v1.0.3</span> 
-        <p class="text-slate-400 mt-0.5">Improved FMHY regex matching. Optimized proxy fallbacks for GitHub Pages.</p>
-      </li>
-      <li>
-        <span class="text-indigo-400 font-medium">v1.0.2</span> 
-        <p class="text-slate-400 mt-0.5">Removed local file CORS restrictions. Added 12s timeout to prevent infinite hanging.</p>
-      </li>
-      <li>
-        <span class="text-indigo-400 font-medium">v1.0.1</span> 
-        <p class="text-slate-400 mt-0.5">Fixed malformed URL paths (double slashes) causing 403 Forbidden errors.</p>
-      </li>
-      <li>
-        <span class="text-indigo-400 font-medium">v1.0.0</span> 
-        <p class="text-slate-400 mt-0.5">Initial release. FMHY integration, async scraping, deduplication.</p>
       </li>
     </ul>
   </div>
@@ -200,10 +188,10 @@ let currentSort = "relevance";
 let mirrors = { annas: "", zlib: "", libgen: "" };
 let debugLogs = [];
 
-// Public CORS proxies. corsproxy.io works well on GitHub Pages.
+// Reordered proxies based on user logs showing allorigins was most successful
 const CORS_PROXIES = [
-  "https://corsproxy.io/?url=",
   "https://api.allorigins.win/raw?url=",
+  "https://corsproxy.io/?url=",
   "https://cors.eu.org/",
   "https://thingproxy.freeboard.io/fetch/"
 ];
@@ -252,19 +240,18 @@ async function initMirrors() {
     const text = await resp.text();
     logDebug(`FMHY list fetched (${text.length} chars).`);
     
-    // More robust regex to find URLs in markdown
     const annasMatch = text.match(/\[Anna's Archive\]\((https?:\/\/[^)]+)\)/i);
     const zlibMatch = text.match(/\[Z-Library\]\((https?:\/\/[^)]+)\)/i);
     const libgenMatch = text.match(/\[Library Genesis\]\((https?:\/\/[^)]+)\)/i);
 
-    // Sanitize URLs by removing trailing slashes
     mirrors = {
       annas: annasMatch ? annasMatch[1].replace(/\/$/, "") : "https://annas-archive.org",
       zlib: zlibMatch ? zlibMatch[1].replace(/\/$/, "") : "https://z-library.sk",
-      libgen: libgenMatch ? libgenMatch[1].replace(/\/$/, "") : "https://libgen.is"
+      // Force .is for LibGen as .li is blocking proxies heavily right now
+      libgen: "https://libgen.is"
     };
 
-    logDebug(`Extracted Mirrors -> Annas: ${mirrors.annas} | Zlib: ${mirrors.zlib} | LibGen: ${mirrors.libgen}`);
+    logDebug(`Extracted Mirrors -> Annas: ${mirrors.annas} | Zlib: ${mirrors.zlib} | LibGen: ${mirrors.libgen} (forced .is)`);
 
     $("#fmhyDot").classList.remove("bg-amber-400", "animate-pulse");
     $("#fmhyDot").classList.add("bg-emerald-400");
@@ -348,7 +335,6 @@ async function fetchHtml(url) {
   
   for (let proxy of CORS_PROXIES) {
     let proxiedUrl;
-    // Handle different proxy URL formats
     if (proxy.includes("allorigins") || proxy.includes("corsproxy")) {
       proxiedUrl = proxy + encodeURIComponent(url);
     } else {
@@ -357,7 +343,7 @@ async function fetchHtml(url) {
 
     logDebug(`Trying proxy: ${proxy}`);
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 12000); // 12s timeout
+    const timeoutId = setTimeout(() => controller.abort(), 12000); 
     
     try {
       const resp = await fetch(proxiedUrl, { signal: controller.signal });
@@ -366,7 +352,6 @@ async function fetchHtml(url) {
       
       if (resp.ok) {
         const html = await resp.text();
-        // Check for Cloudflare challenges or error pages
         if (html && html.length > 50 && !html.includes("Just a moment...") && !html.includes("403 Forbidden")) {
           logDebug(`Valid HTML received (${html.length} chars).`);
           return new DOMParser().parseFromString(html, "text/html");
@@ -393,7 +378,17 @@ async function searchAnnas(query) {
     const results = [];
     const seenMd5 = new Set();
     
-    doc.querySelectorAll('a[href*="/md5/"]').forEach(a => {
+    // Anna's Archive updated their HTML. Links are usually inside divs.
+    // We look for any anchor tag pointing to /md5/
+    const links = doc.querySelectorAll('a[href*="/md5/"]');
+    logDebug(`Anna's Archive: Found ${links.length} links.`);
+    
+    if (links.length === 0) {
+      // Log a snippet to see what we actually received
+      logDebug(`HTML Snippet: ${doc.body.innerHTML.substring(0, 500).replace(/\n/g, ' ')}`);
+    }
+    
+    links.forEach(a => {
       const href = a.getAttribute('href') || "";
       const m = href.match(/\/md5\/([a-f0-9]+)/);
       if (!m) return;
@@ -443,21 +438,15 @@ async function searchAnnas(query) {
 
 async function searchLibgen(query) {
   try {
-    // Try primary URL, fallback to .is if .li fails
-    let url = `${mirrors.libgen}/search.php?req=${encodeURIComponent(query)}&open=0&res=50&view=simple&phrase=1&column=def`;
-    let doc;
-    try {
-      doc = await fetchHtml(url);
-    } catch (e1) {
-      logDebug(`Primary LibGen failed, trying libgen.is fallback...`);
-      url = `https://libgen.is/search.php?req=${encodeURIComponent(query)}&open=0&res=50&view=simple&phrase=1&column=def`;
-      doc = await fetchHtml(url);
-    }
+    // Using libgen.is directly as it's more proxy-friendly
+    let url = `https://libgen.is/search.php?req=${encodeURIComponent(query)}&open=0&res=50&view=simple&phrase=1&column=def`;
+    let doc = await fetchHtml(url);
 
     const results = [];
     const table = doc.querySelector('table.c') || doc.querySelector('table');
     if (!table) {
       logDebug("LibGen: Could not find results table.");
+      logDebug(`HTML Snippet: ${doc.body.innerHTML.substring(0, 500).replace(/\n/g, ' ')}`);
       return results;
     }
     
@@ -483,14 +472,14 @@ async function searchLibgen(query) {
         detailUrl = titleLink.getAttribute('href') || "";
         const mm = detailUrl.match(/md5=([a-f0-9]+)/);
         if (mm) md5 = mm[1];
-        detailUrl = new URL(detailUrl, mirrors.libgen).href;
+        detailUrl = new URL(detailUrl, "https://libgen.is").href;
       }
       
       let downloadUrl = "";
       [9, 10, 11].forEach(i => {
         if (!downloadUrl && cells[i]) {
           const a = cells[i].querySelector('a');
-          if (a && a.getAttribute('href')) downloadUrl = new URL(a.getAttribute('href'), mirrors.libgen).href;
+          if (a && a.getAttribute('href')) downloadUrl = new URL(a.getAttribute('href'), "https://libgen.is").href;
         }
       });
       
@@ -516,6 +505,11 @@ async function searchZlibrary(query) {
     let entries = doc.querySelectorAll('.resItemBox, .bookRow, [data-book_id], .booklist-row');
     if (entries.length === 0) {
       entries = doc.querySelectorAll('a[href*="/book/"]');
+    }
+    
+    logDebug(`Z-Library: Found ${entries.length} entries.`);
+    if (entries.length === 0) {
+      logDebug(`HTML Snippet: ${doc.body.innerHTML.substring(0, 500).replace(/\n/g, ' ')}`);
     }
     
     entries.forEach(entry => {
