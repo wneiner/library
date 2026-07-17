@@ -157,21 +157,21 @@ tailwind.config = { darkMode: 'class' }
 
 <!-- Version & Changelog Tooltip -->
 <div class="fixed bottom-4 right-4 z-50 group">
-  <span class="text-xs text-slate-600 cursor-help select-none">v1.3.0</span>
+  <span class="text-xs text-slate-600 cursor-help select-none">v1.4.0</span>
   <div class="absolute bottom-6 right-0 hidden group-hover:block bg-slate-800 border border-slate-700 p-4 rounded-lg shadow-xl w-72 text-xs text-slate-300 transition-opacity duration-200 opacity-0 group-hover:opacity-100">
     <div class="font-bold mb-2 text-slate-100 border-b border-slate-700 pb-2">Changelog</div>
     <ul class="space-y-2">
       <li>
+        <span class="text-indigo-400 font-medium">v1.4.0</span> 
+        <p class="text-slate-400 mt-0.5">Fixed Anna's Archive parser to check parent element for text when link is empty (image links). Reordered proxies for optimal success.</p>
+      </li>
+      <li>
         <span class="text-indigo-400 font-medium">v1.3.0</span> 
-        <p class="text-slate-400 mt-0.5">Fixed Anna's Archive MD5 extraction. Reduced proxy timeout for faster failover. Reordered proxies.</p>
+        <p class="text-slate-400 mt-0.5">Fixed Anna's Archive MD5 extraction. Reduced proxy timeout for faster failover.</p>
       </li>
       <li>
         <span class="text-indigo-400 font-medium">v1.2.0</span> 
         <p class="text-slate-400 mt-0.5">Updated Anna's Archive parser for new layout. Forced LibGen to .is domain.</p>
-      </li>
-      <li>
-        <span class="text-indigo-400 font-medium">v1.1.0</span> 
-        <p class="text-slate-400 mt-0.5">Added Debug Console for logging proxy and fetch errors. Added more proxy fallbacks.</p>
       </li>
     </ul>
   </div>
@@ -188,11 +188,12 @@ let currentSort = "relevance";
 let mirrors = { annas: "", zlib: "", libgen: "" };
 let debugLogs = [];
 
-// Reordered proxies and reduced timeout for faster failover
+// Reordered proxies based on user logs showing corsproxy.io succeeded
 const CORS_PROXIES = [
+  "https://corsproxy.io/?url=",
   "https://api.allorigins.win/raw?url=",
   "https://api.codetabs.com/v1/proxy/?quest=",
-  "https://corsproxy.io/?url=",
+  "https://test.cors.workers.dev/?",
   "https://cors.eu.org/"
 ];
 
@@ -334,7 +335,7 @@ async function fetchHtml(url) {
   
   for (let proxy of CORS_PROXIES) {
     let proxiedUrl;
-    if (proxy.includes("allorigins") || proxy.includes("corsproxy")) {
+    if (proxy.includes("allorigins") || proxy.includes("corsproxy") || proxy.includes("workers.dev")) {
       proxiedUrl = proxy + encodeURIComponent(url);
     } else {
       proxiedUrl = proxy + url;
@@ -342,7 +343,7 @@ async function fetchHtml(url) {
 
     logDebug(`Trying proxy: ${proxy}`);
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000); // Reduced to 8s timeout
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
     
     try {
       const resp = await fetch(proxiedUrl, { signal: controller.signal });
@@ -388,15 +389,13 @@ async function searchAnnas(query) {
       logDebug(`Sample hrefs: ${sampleHrefs.join(' | ')}`);
     }
     
-    links.forEach(a => {
+    links.forEach((a, i) => {
       const href = a.getAttribute('href') || "";
       
-      // More robust MD5 extraction using string split
       let md5 = "";
       if (href.includes("/md5/")) {
         const parts = href.split("/md5/");
         if (parts.length > 1) {
-          // Get the first segment after /md5/, ignoring query params or fragments
           md5 = parts[1].split(/[/?#]/)[0];
         }
       }
@@ -405,7 +404,18 @@ async function searchAnnas(query) {
       if (seenMd5.has(md5)) return;
       seenMd5.add(md5);
       
-      const text = a.innerText || a.textContent;
+      // Anna's Archive often wraps the cover image in the first <a> tag, which has no text.
+      // If text is empty, fallback to the parent element which contains the full result card.
+      let text = a.innerText || a.textContent || "";
+      if (text.trim().length === 0 && a.parentElement) {
+        text = a.parentElement.innerText || a.parentElement.textContent || "";
+      }
+      
+      // Log the first link's HTML if text is STILL empty so we can see what's happening
+      if (i === 0 && text.trim().length === 0) {
+        logDebug(`Empty text on first link! HTML: ${a.outerHTML.substring(0, 200)}`);
+      }
+      
       const lines = text.split('\n').map(s => s.trim()).filter(s => s.length > 0);
       
       let size = "", ext = "", year = "", title = "", author = "";
