@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>📚 All-in-One Book Search</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = { darkMode: 'class' }
+</script>
+<style>
+  :root { color-scheme: dark; }
+  body { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+  .fade-in { animation: fadeIn .25s ease-out; }
+  @keyframes fadeIn { from {opacity:0; transform:translateY(6px)} to {opacity:1; transform:translateY(0)} }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: #0f172a; }
+  ::-webkit-scrollbar-thumb { background: #334155; border-radius: 6px; }
+  ::-webkit-scrollbar-thumb:hover { background: #475569; }
+  .skeleton {
+    background: linear-gradient(90deg, #1e293b 25%, #334155 50%, #1e293b 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.4s infinite;
+  }
+  @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+</style>
+</head>
+<body class="bg-slate-950 text-slate-200 min-h-screen">
+
+<!-- Header -->
+<header class="border-b border-slate-800/80 bg-slate-900/40 backdrop-blur sticky top-0 z-40">
+  <div class="max-w-6xl mx-auto px-4 py-4 flex items-center gap-3">
+    <div class="text-2xl">📚</div>
+    <div>
+      <h1 class="text-lg font-semibold text-slate-100 leading-tight">All-in-One Book Search</h1>
+      <p class="text-xs text-slate-500">Anna's Archive · LibGen · Z-Library · <span class="text-indigo-400">FMHY Powered</span></p>
+    </div>
+    <div class="ml-auto text-xs text-slate-600 hidden sm:flex items-center gap-2">
+      <span class="flex items-center gap-1.5">
+        <span id="fmhyDot" class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+        <span id="fmhyStatus">Fetching FMHY...</span>
+      </span>
+    </div>
+  </div>
+</header>
+
+<main class="max-w-6xl mx-auto px-4 py-8">
+
+  <!-- Search bar -->
+  <div class="relative mb-6">
+    <svg class="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+    </svg>
+    <input id="searchInput" type="text" autocomplete="off" disabled
+      placeholder="Initializing mirrors..."
+      class="w-full bg-slate-900 border border-slate-800 rounded-xl pl-12 pr-32 py-4 text-base text-slate-100 placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/60 focus:border-transparent transition disabled:opacity-50" />
+    <button id="searchBtn" disabled
+      class="absolute right-2 top-1/2 -translate-y-1/2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium px-5 py-2.5 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+      Search
+    </button>
+  </div>
+
+  <!-- Filter / sort bar -->
+  <div id="filterBar" class="hidden mb-6 flex flex-wrap items-center gap-3 text-sm">
+    <div class="flex items-center gap-2">
+      <span class="text-slate-500 text-xs uppercase tracking-wide">Sources</span>
+      <button data-source="Anna's Archive" class="src-toggle px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800 text-slate-300 hover:border-indigo-500 transition text-xs font-medium">
+        <span class="inline-block w-2 h-2 rounded-full bg-emerald-400 mr-1.5"></span>Anna's
+      </button>
+      <button data-source="LibGen" class="src-toggle px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800 text-slate-300 hover:border-indigo-500 transition text-xs font-medium">
+        <span class="inline-block w-2 h-2 rounded-full bg-sky-400 mr-1.5"></span>LibGen
+      </button>
+      <button data-source="Z-Library" class="src-toggle px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800 text-slate-300 hover:border-indigo-500 transition text-xs font-medium">
+        <span class="inline-block w-2 h-2 rounded-full bg-amber-400 mr-1.5"></span>Z-Lib
+      </button>
+    </div>
+
+    <div class="w-px h-6 bg-slate-800"></div>
+
+    <div class="flex items-center gap-2">
+      <span class="text-slate-500 text-xs uppercase tracking-wide">Type</span>
+      <select id="extFilter" class="bg-slate-900 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-slate-300 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+        <option value="">All</option>
+        <option value="pdf">PDF</option>
+        <option value="epub">EPUB</option>
+        <option value="mobi">MOBI</option>
+        <option value="azw3">AZW3</option>
+        <option value="txt">TXT</option>
+        <option value="djvu">DJVU</option>
+      </select>
+    </div>
+
+    <div class="w-px h-6 bg-slate-800"></div>
+
+    <div class="flex items-center gap-2">
+      <span class="text-slate-500 text-xs uppercase tracking-wide">Sort</span>
+      <select id="sortBy" class="bg-slate-900 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-slate-300 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+        <option value="relevance">Relevance</option>
+        <option value="size_desc">Size ↓</option>
+        <option value="size_asc">Size ↑</option>
+        <option value="year_desc">Year ↓</option>
+        <option value="year_asc">Year ↑</option>
+        <option value="title">Title A–Z</option>
+      </select>
+    </div>
+
+    <div class="ml-auto text-xs text-slate-500">
+      <span id="resultCount">0</span> results
+    </div>
+  </div>
+
+  <!-- Error badges -->
+  <div id="errorBar" class="hidden mb-4 flex flex-wrap gap-2"></div>
+
+  <!-- Loading skeletons -->
+  <div id="skeletons" class="hidden space-y-3">
+    <div class="skeleton h-24 rounded-xl"></div>
+    <div class="skeleton h-24 rounded-xl"></div>
+    <div class="skeleton h-24 rounded-xl"></div>
+  </div>
+
+  <!-- Results -->
+  <div id="results" class="space-y-3"></div>
+
+  <!-- Empty / initial state -->
+  <div id="emptyState" class="text-center py-20 text-slate-600">
+    <div class="text-6xl mb-4">📖</div>
+    <p class="text-lg">Search across Anna's Archive, LibGen, and Z-Library.</p>
+    <p class="text-sm mt-2">Results appear instantly, aggregated and deduplicated.</p>
+    <p class="text-xs mt-4 text-slate-700">Mirror URLs dynamically fetched from FMHY.</p>
+  </div>
+
+</main>
+
+<footer class="border-t border-slate-800/60 mt-12 py-6 text-center text-xs text-slate-600">
+  Educational project — respect copyright and your local laws.<br/>
+  Uses public CORS proxies. May be slow or rate-limited.
+</footer>
+
+<script>
+// ----------------------------------------------------------------
+// State & Config
+// ----------------------------------------------------------------
+let allResults = [];
+let activeSources = new Set(["Anna's Archive", "LibGen", "Z-Library"]);
+let currentExt = "";
+let currentSort = "relevance";
+let mirrors = { annas: "", zlib: "", libgen: "" };
+
+// Multiple public CORS proxies to bypass browser cross-origin restrictions.
+// Removed corsproxy.io as it blocks local file:// origins (null origin) with 403.
+const CORS_PROXIES = [
+  "https://api.allorigins.win/raw?url=",
+  "https://api.codetabs.com/v1/proxy/?quest=",
+  "https://thingproxy.freeboard.io/fetch/"
+];
+
+const FMHY_RAW_URL = "https://raw.githubusercontent.com/fmhy/FMHYedit/main/docs/reading.md";
+
+const $ = (sel) => document.querySelector(sel);
+const resultsEl = $("#results");
+const emptyEl  = $("#emptyState");
+const filterBar = $("#filterBar");
+const skeletonEl = $("#skeletons");
+const errorBar = $("#errorBar");
+const countEl = $("#resultCount");
+
+const SRC_DOT = {
+  "Anna's Archive": "bg-emerald-400",
+  "LibGen": "bg-sky-400",
+  "Z-Library": "bg-amber-400",
+};
+
+const VALID_EXTS = ["pdf", "epub", "mobi", "azw", "azw3", "djvu", "txt", "fb2", "rtf", "doc", "docx"];
+
+// ----------------------------------------------------------------
+// Initialization: Fetch mirrors from FMHY
+// ----------------------------------------------------------------
+async function initMirrors() {
+  try {
+    const resp = await fetch(FMHY_RAW_URL);
+    const text = await resp.text();
+    
+    const annasMatch = text.match(/\*\*\[Anna's Archive\]\((https?:\/\/[^)]+)\)/);
+    const zlibMatch = text.match(/\*\*\[Z-Library\]\((https?:\/\/[^)]+)\)/);
+    const libgenMatch = text.match(/\*\*\[Library Genesis\]\((https?:\/\/[^)]+)\)/);
+
+    // Sanitize URLs by removing trailing slashes to prevent malformed paths (e.g. //search)
+    mirrors = {
+      annas: annasMatch ? annasMatch[1].replace(/\/$/, "") : "https://annas-archive.org",
+      zlib: zlibMatch ? zlibMatch[1].replace(/\/$/, "") : "https://z-library.sk",
+      libgen: libgenMatch ? libgenMatch[1].replace(/\/$/, "") : "https://libgen.is"
+    };
+
+    $("#fmhyDot").classList.remove("bg-amber-400", "animate-pulse");
+    $("#fmhyDot").classList.add("bg-emerald-400");
+    $("#fmhyStatus").textContent = "FMHY Connected";
+    $("#searchInput").disabled = false;
+    $("#searchBtn").disabled = false;
+    $("#searchInput").placeholder = "Search for books, authors, ISBN...";
+    $("#searchInput").focus();
+    
+  } catch (e) {
+    console.error("Failed to fetch FMHY list", e);
+    $("#fmhyDot").classList.remove("bg-amber-400", "animate-pulse");
+    $("#fmhyDot").classList.add("bg-rose-400");
+    $("#fmhyStatus").textContent = "FMHY Failed (using fallback)";
+    
+    mirrors = {
+      annas: "https://annas-archive.org",
+      zlib: "https://z-library.sk",
+      libgen: "https://libgen.is"
+    };
+    $("#searchInput").disabled = false;
+    $("#searchBtn").disabled = false;
+    $("#searchInput").placeholder = "Search for books, authors, ISBN...";
+  }
+}
+
+// ----------------------------------------------------------------
+// Helpers
+// ----------------------------------------------------------------
+function parseSize(sizeStr) {
+  if (!sizeStr) return 0;
+  const s = sizeStr.toUpperCase().replace(" ", "").replace(",", ".");
+  const m = s.match(/([\d.]+)\s*([KMGT]?B?)/);
+  if (!m) return 0;
+  const num = parseFloat(m[1]);
+  const unit = m[2] || "B";
+  const mult = { B: 1, KB: 1024, MB: 1024**2, GB: 1024**3, TB: 1024**4 };
+  return Math.floor(num * (mult[unit] || 1));
+}
+
+function escapeHtml(s) {
+  if (s == null) return "";
+  return String(s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+function escapeAttr(s) { return escapeHtml(s); }
+
+function _norm(text) {
+  return (text || "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function deduplicate(results) {
+  const seen = {};
+  const out = [];
+  
+  for (let r of results) {
+    let key = r.md5 ? "md5:" + r.md5 : `t:${_norm(r.title)}|a:${_norm(r.author)}`;
+    if (seen[key]) {
+      let existing = seen[key];
+      if (!existing.sources.includes(r.source)) existing.sources.push(r.source);
+      if (!existing.year && r.year) existing.year = r.year;
+      if (!existing.size && r.size) existing.size = r.size;
+      if (!existing.extension && r.extension) existing.extension = r.extension;
+      if (!existing.download_url && r.download_url) existing.download_url = r.download_url;
+    } else {
+      r.sources = [r.source];
+      seen[key] = r;
+      out.push(r);
+    }
+  }
+  return out;
+}
+
+// ----------------------------------------------------------------
+// Scrapers (using DOMParser with Fallback Proxies)
+// ----------------------------------------------------------------
+async function fetchHtml(url) {
+  let lastError = null;
+  
+  // Try each proxy in order until one works
+  for (let proxy of CORS_PROXIES) {
+    // Format URL properly for each proxy type
+    let proxiedUrl;
+    if (proxy.includes("allorigins") || proxy.includes("corsproxy")) {
+      proxiedUrl = proxy + encodeURIComponent(url);
+    } else {
+      proxiedUrl = proxy + url;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000); // 12s timeout
+    
+    try {
+      const resp = await fetch(proxiedUrl, { signal: controller.signal });
+      clearTimeout(timeoutId);
+      if (resp.ok) {
+        const html = await resp.text();
+        // Basic check to ensure we got actual HTML content, not an error page
+        if (html && html.length > 50 && !html.includes("HTTP Status 522") && !html.includes("403 Forbidden")) {
+          return new DOMParser().parseFromString(html, "text/html");
+        }
+      }
+    } catch (e) {
+      clearTimeout(timeoutId);
+      lastError = e;
+    }
+  }
+  throw new Error(`All proxies failed. Last error: ${lastError?.message || 'Unknown'}`);
+}
+
+async function searchAnnas(query) {
+  const doc = await fetchHtml(`${mirrors.annas}/search?q=${encodeURIComponent(query)}`);
+  const results = [];
+  const seenMd5 = new Set();
+  
+  doc.querySelectorAll('a[href*="/md5/"]').forEach(a => {
+    const href = a.getAttribute('href') || "";
+    const m = href.match(/\/md5\/([a-f0-9]+)/);
+    if (!m) return;
+    const md5 = m[1];
+    if (seenMd5.has(md5)) return;
+    seenMd5.add(md5);
+    
+    const parts = Array.from(a.querySelectorAll('*')).map(el => el.textContent.trim()).filter(t => t.length > 0);
+    if(parts.length === 0) parts.push(...a.textContent.split(/\s+/).filter(t => t.length > 0));
+    
+    let size = "", ext = "", year = "", title = "", author = "";
+    
+    parts.forEach(p => {
+      if (!size && /^[\d.,]+\s*[KMGT]?B$/i.test(p)) size = p;
+      else if (!ext && VALID_EXTS.includes(p.toLowerCase())) ext = p.toLowerCase();
+      else if (!year && /^(19|20)\d{2}$/.test(p)) year = p;
+    });
+    
+    for (let p of parts) {
+      if (p.length > 8 && !/^[\d.,]+\s*[KMGT]?B$/i.test(p) && !VALID_EXTS.includes(p.toLowerCase()) && !/^(19|20)\d{2}$/.test(p)) {
+        title = p; break;
+      }
+    }
+    
+    if (title) {
+      results.push({
+        title, author: author || "Unknown", year, size, size_bytes: parseSize(size),
+        extension: ext, md5, source: "Anna's Archive",
+        url: new URL(href, mirrors.annas).href,
+        download_url: new URL(href, mirrors.annas).href,
+      });
+    }
+  });
+  return results;
+}
+
+async function searchLibgen(query) {
+  const doc = await fetchHtml(`${mirrors.libgen}/search.php?req=${encodeURIComponent(query)}&open=0&res=50&view=simple&phrase=1&column=def`);
+  const results = [];
+  const table = doc.querySelector('table.c') || doc.querySelector('table');
+  if (!table) return results;
+  
+  const rows = table.querySelectorAll('tr');
+  rows.forEach((row, idx) => {
+    if (idx === 0) return; // skip header
+    const cells = row.querySelectorAll('td');
+    if (cells.length < 9) return;
+    
+    const author = cells[1].textContent.trim();
+    const titleCell = cells[2];
+    let title = titleCell.textContent.trim().replace(/\s*\[.*?\]\s*$/, "").trim();
+    
+    const year = cells[4] ? cells[4].textContent.trim() : "";
+    const size = cells[7] ? cells[7].textContent.trim() : "";
+    const ext = cells[8] ? cells[8].textContent.trim().toLowerCase() : "";
+    
+    let md5 = "";
+    const detailLink = titleCell.querySelector('a');
+    let detailUrl = "";
+    if (detailLink) {
+      detailUrl = detailLink.getAttribute('href') || "";
+      const mm = detailUrl.match(/md5=([a-f0-9]+)/);
+      if (mm) md5 = mm[1];
+      detailUrl = new URL(detailUrl, mirrors.libgen).href;
+    }
+    
+    let downloadUrl = "";
+    [9, 10, 11].forEach(i => {
+      if (!downloadUrl && cells[i]) {
+        const a = cells[i].querySelector('a');
+        if (a && a.getAttribute('href')) downloadUrl = new URL(a.getAttribute('href'), mirrors.libgen).href;
+      }
+    });
+    
+    results.push({
+      title: title || "Unknown", author: author || "Unknown", year, size,
+      size_bytes: parseSize(size), extension: ext, md5, source: "LibGen",
+      url: detailUrl, download_url: downloadUrl
+    });
+  });
+  return results;
+}
+
+async function searchZlibrary(query) {
+  const doc = await fetchHtml(`${mirrors.zlib}/s/${encodeURIComponent(query)}`);
+  const results = [];
+  
+  let entries = doc.querySelectorAll('.resItemBox, .bookRow, [data-book_id], .booklist-row');
+  if (entries.length === 0) {
+    entries = doc.querySelectorAll('a[href*="/book/"]');
+  }
+  
+  entries.forEach(entry => {
+    let titleEl = entry.querySelector('h3 a, .bookTitle, a[href*="/book/"], .book-title');
+    if (!titleEl && entry.tagName === 'A' && entry.getAttribute('href')?.includes('/book/')) {
+      titleEl = entry;
+    }
+    if (!titleEl) return;
+    
+    const title = titleEl.textContent.trim();
+    const href = titleEl.getAttribute('href') || "";
+    if (!title || !href) return;
+    
+    const authorEl = entry.querySelector('.bookAuthor, .authors, a[href*="/author/"], .book-author');
+    const author = authorEl ? authorEl.textContent.trim() : "";
+    
+    const fullText = entry.textContent;
+    const ym = fullText.match(/\b(19|20)\d{2}\b/);
+    const year = ym ? ym[0] : "";
+    const sm = fullText.match(/[\d.]+\s*[KMGT]?B/i);
+    const size = sm ? sm[0] : "";
+    const em = fullText.match(new RegExp(`\\b(${VALID_EXTS.join('|')})\\b`, 'i'));
+    const ext = em ? em[0].toLowerCase() : "";
+    
+    let md5 = "";
+    const mm = href.match(/\/book\/\d+\/([a-f0-9]+)/);
+    if (mm) md5 = mm[1];
+    
+    results.push({
+      title, author: author || "Unknown", year, size, size_bytes: parseSize(size),
+      extension: ext, md5, source: "Z-Library",
+      url: new URL(href, mirrors.zlib).href,
+      download_url: new URL(href, mirrors.zlib).href,
+    });
+  });
+  return results;
+}
+
+// ----------------------------------------------------------------
+// Search Execution
+// ----------------------------------------------------------------
+let debounceTimer;
+ $("#searchInput").addEventListener("input", (e) => {
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(() => doSearch(e.target.value), 500);
+});
+ $("#searchInput").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { clearTimeout(debounceTimer); doSearch(e.target.value); }
+});
+ $("#searchBtn").addEventListener("click", () => doSearch($("#searchInput").value));
+
+async function doSearch(q) {
+  q = q.trim();
+  if (!q) return;
+
+  resultsEl.innerHTML = "";
+  emptyEl.classList.add("hidden");
+  filterBar.classList.add("hidden");
+  errorBar.classList.add("hidden");
+  skeletonEl.classList.remove("hidden");
+
+  const scrapers = [
+    { name: "Anna's Archive", fn: searchAnnas },
+    { name: "LibGen", fn: searchLibgen },
+    { name: "Z-Library", fn: searchZlibrary }
+  ];
+
+  // Run all concurrently, catch individual errors
+  const settled = await Promise.allSettled(scrapers.map(s => s.fn(q)));
+  
+  let allResultsRaw = [];
+  let errors = [];
+  let counts = {};
+
+  settled.forEach((res, i) => {
+    const name = scrapers[i].name;
+    if (res.status === 'fulfilled') {
+      counts[name] = res.value.length;
+      allResultsRaw = allResultsRaw.concat(res.value);
+    } else {
+      counts[name] = 0;
+      errors.push(`${name} timed out or errored`);
+    }
+  });
+
+  allResults = deduplicate(allResultsRaw);
+  
+  allResults.forEach((r, i) => {
+    r.relevance = (r.sources?.length || 1) * 1000 - i;
+  });
+
+  skeletonEl.classList.add("hidden");
+  filterBar.classList.remove("hidden");
+  renderErrors(errors);
+  renderCounts(counts);
+  render();
+}
+
+// ----------------------------------------------------------------
+// Rendering
+// ----------------------------------------------------------------
+function getFilteredSorted() {
+  let list = allResults.filter(r => activeSources.has(r.source));
+  if (currentExt) {
+    list = list.filter(r => (r.extension || "").toLowerCase() === currentExt);
+  }
+  const sorters = {
+    relevance: (a, b) => (b.relevance || 0) - (a.relevance || 0),
+    size_desc: (a, b) => (b.size_bytes || 0) - (a.size_bytes || 0),
+    size_asc:  (a, b) => (a.size_bytes || 0) - (b.size_bytes || 0),
+    year_desc: (a, b) => (parseInt(b.year) || 0) - (parseInt(a.year) || 0),
+    year_asc:  (a, b) => (parseInt(a.year) || 0) - (parseInt(b.year) || 0),
+    title:     (a, b) => (a.title || "").localeCompare(b.title || ""),
+  };
+  list.sort(sorters[currentSort] || sorters.relevance);
+  return list;
+}
+
+function render() {
+  const list = getFilteredSorted();
+  countEl.textContent = list.length;
+
+  if (list.length === 0) {
+    resultsEl.innerHTML = `
+      <div class="text-center py-16 text-slate-600">
+        <div class="text-4xl mb-3">🔍</div>
+        <p>No results match your filters.</p>
+      </div>`;
+    return;
+  }
+
+  resultsEl.innerHTML = list.map(renderCard).join("");
+  resultsEl.classList.add("fade-in");
+  setTimeout(() => resultsEl.classList.remove("fade-in"), 300);
+}
+
+function renderCard(r) {
+  const ext = (r.extension || "?").toUpperCase();
+  const extColor = extBadgeColor(ext);
+  const sources = (r.sources || [r.source]).map(s =>
+    `<span class="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
+       <span class="w-1.5 h-1.5 rounded-full ${SRC_DOT[s] || 'bg-slate-500'}"></span>${escapeHtml(s)}
+     </span>`
+  ).join("");
+
+  const year = r.year ? `<span class="text-slate-500">${escapeHtml(r.year)}</span>` : "";
+  const size = r.size ? `<span class="text-slate-500">${escapeHtml(r.size)}</span>` : "";
+
+  return `
+  <div class="group bg-slate-900/60 border border-slate-800 rounded-xl p-4 hover:border-slate-600 transition fade-in">
+    <div class="flex items-start gap-4">
+      <div class="flex-shrink-0 w-14 h-16 rounded-lg ${extColor} flex items-center justify-center text-xs font-bold text-white shadow-lg">
+        ${escapeHtml(ext)}
+      </div>
+      <div class="flex-1 min-w-0">
+        <h3 class="font-medium text-slate-100 leading-snug truncate group-hover:text-indigo-300 transition">
+          ${escapeHtml(r.title)}
+        </h3>
+        <p class="text-sm text-slate-400 mt-0.5 truncate">${escapeHtml(r.author)}</p>
+        <div class="flex flex-wrap items-center gap-2 mt-2 text-xs">
+          ${year}
+          ${size ? `<span class="text-slate-700">·</span>` : ''}
+          ${size}
+          ${r.md5 ? `<span class="text-slate-700">·</span><span class="text-slate-600 font-mono text-[10px]">${escapeHtml(r.md5.substring(0,8))}…</span>` : ''}
+        </div>
+        <div class="flex flex-wrap gap-1.5 mt-2">${sources}</div>
+      </div>
+      <div class="flex-shrink-0 flex flex-col gap-2">
+        ${r.download_url ? `
+        <a href="${escapeAttr(r.download_url)}" target="_blank" rel="noopener"
+           class="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium px-3 py-2 rounded-lg transition">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+          </svg>
+          Download
+        </a>` : ''}
+        ${r.url ? `
+        <a href="${escapeAttr(r.url)}" target="_blank" rel="noopener"
+           class="inline-flex items-center justify-center bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-3 py-2 rounded-lg transition">
+          View
+        </a>` : ''}
+      </div>
+    </div>
+  </div>`;
+}
+
+function extBadgeColor(ext) {
+  const map = {
+    PDF:  "bg-rose-600", EPUB: "bg-orange-600", MOBI: "bg-purple-600",
+    AZW3: "bg-purple-700", AZW:  "bg-purple-700", DJVU: "bg-teal-600",
+    TXT:  "bg-slate-600", FB2:  "bg-blue-600", RTF:  "bg-cyan-700", DOC:  "bg-indigo-600",
+  };
+  return map[ext] || "bg-slate-600";
+}
+
+function renderErrors(errors) {
+  if (!errors.length) { errorBar.classList.add("hidden"); return; }
+  errorBar.classList.remove("hidden");
+  errorBar.innerHTML = errors.map(e => `
+    <span class="inline-flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs px-3 py-1.5 rounded-lg">
+      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5 19h14a2 2 0 001.84-2.75L13.74 4a2 2 0 00-3.48 0L3.16 16.25A2 2 0 005 19z"/>
+      </svg>
+      ${escapeHtml(e)}
+    </span>
+  `).join("");
+}
+
+function renderCounts(counts) {
+  document.querySelectorAll(".src-toggle").forEach(btn => {
+    const src = btn.dataset.source;
+    const n = counts[src] ?? 0;
+    btn.classList.remove("opacity-40");
+    if (n === 0) btn.classList.add("opacity-40");
+    let label = btn.dataset.label;
+    if (!label) { label = btn.textContent.trim(); btn.dataset.label = label; }
+    btn.textContent = "";
+    const dot = document.createElement("span");
+    dot.className = `inline-block w-2 h-2 rounded-full ${SRC_DOT[src]} mr-1.5`;
+    btn.appendChild(dot);
+    btn.appendChild(document.createTextNode(`${label} · ${n}`));
+  });
+}
+
+// ----------------------------------------------------------------
+// Event Listeners for Filters
+// ----------------------------------------------------------------
+document.querySelectorAll(".src-toggle").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const src = btn.dataset.source;
+    if (activeSources.has(src)) {
+      if (activeSources.size === 1) return; // keep at least one
+      activeSources.delete(src);
+      btn.classList.add("opacity-40");
+    } else {
+      activeSources.add(src);
+      btn.classList.remove("opacity-40");
+    }
+    render();
+  });
+});
+
+ $("#extFilter").addEventListener("change", (e) => {
+  currentExt = e.target.value;
+  render();
+});
+
+ $("#sortBy").addEventListener("change", (e) => {
+  currentSort = e.target.value;
+  render();
+});
+
+// Start initialization on load
+window.addEventListener("load", initMirrors);
+</script>
+</body>
+</html>
