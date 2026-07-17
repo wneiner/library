@@ -147,12 +147,11 @@ let currentExt = "";
 let currentSort = "relevance";
 let mirrors = { annas: "", zlib: "", libgen: "" };
 
-// Multiple public CORS proxies to bypass browser cross-origin restrictions.
-// Removed corsproxy.io as it blocks local file:// origins (null origin) with 403.
+// Public CORS proxies. corsproxy.io works well on GitHub Pages.
 const CORS_PROXIES = [
+  "https://corsproxy.io/?url=",
   "https://api.allorigins.win/raw?url=",
-  "https://api.codetabs.com/v1/proxy/?quest=",
-  "https://thingproxy.freeboard.io/fetch/"
+  "https://api.codetabs.com/v1/proxy/?quest="
 ];
 
 const FMHY_RAW_URL = "https://raw.githubusercontent.com/fmhy/FMHYedit/main/docs/reading.md";
@@ -181,11 +180,12 @@ async function initMirrors() {
     const resp = await fetch(FMHY_RAW_URL);
     const text = await resp.text();
     
-    const annasMatch = text.match(/\*\*\[Anna's Archive\]\((https?:\/\/[^)]+)\)/);
-    const zlibMatch = text.match(/\*\*\[Z-Library\]\((https?:\/\/[^)]+)\)/);
-    const libgenMatch = text.match(/\*\*\[Library Genesis\]\((https?:\/\/[^)]+)\)/);
+    // More robust regex to find URLs in markdown
+    const annasMatch = text.match(/\[Anna's Archive\]\((https?:\/\/[^)]+)\)/i);
+    const zlibMatch = text.match(/\[Z-Library\]\((https?:\/\/[^)]+)\)/i);
+    const libgenMatch = text.match(/\[Library Genesis\]\((https?:\/\/[^)]+)\)/i);
 
-    // Sanitize URLs by removing trailing slashes to prevent malformed paths (e.g. //search)
+    // Sanitize URLs by removing trailing slashes
     mirrors = {
       annas: annasMatch ? annasMatch[1].replace(/\/$/, "") : "https://annas-archive.org",
       zlib: zlibMatch ? zlibMatch[1].replace(/\/$/, "") : "https://z-library.sk",
@@ -271,10 +271,9 @@ function deduplicate(results) {
 async function fetchHtml(url) {
   let lastError = null;
   
-  // Try each proxy in order until one works
   for (let proxy of CORS_PROXIES) {
-    // Format URL properly for each proxy type
     let proxiedUrl;
+    // Handle different proxy URL formats
     if (proxy.includes("allorigins") || proxy.includes("corsproxy")) {
       proxiedUrl = proxy + encodeURIComponent(url);
     } else {
@@ -289,8 +288,8 @@ async function fetchHtml(url) {
       clearTimeout(timeoutId);
       if (resp.ok) {
         const html = await resp.text();
-        // Basic check to ensure we got actual HTML content, not an error page
-        if (html && html.length > 50 && !html.includes("HTTP Status 522") && !html.includes("403 Forbidden")) {
+        // Check for Cloudflare challenges or error pages
+        if (html && html.length > 50 && !html.includes("Just a moment...") && !html.includes("403 Forbidden")) {
           return new DOMParser().parseFromString(html, "text/html");
         }
       }
@@ -315,20 +314,31 @@ async function searchAnnas(query) {
     if (seenMd5.has(md5)) return;
     seenMd5.add(md5);
     
-    const parts = Array.from(a.querySelectorAll('*')).map(el => el.textContent.trim()).filter(t => t.length > 0);
-    if(parts.length === 0) parts.push(...a.textContent.split(/\s+/).filter(t => t.length > 0));
+    // Use innerText to get a clean, line-by-line representation of the result card
+    const text = a.innerText || a.textContent;
+    const lines = text.split('\n').map(s => s.trim()).filter(s => s.length > 0);
     
     let size = "", ext = "", year = "", title = "", author = "";
     
-    parts.forEach(p => {
-      if (!size && /^[\d.,]+\s*[KMGT]?B$/i.test(p)) size = p;
-      else if (!ext && VALID_EXTS.includes(p.toLowerCase())) ext = p.toLowerCase();
-      else if (!year && /^(19|20)\d{2}$/.test(p)) year = p;
-    });
+    // Metadata extraction from the full text block
+    const fullText = text.replace(/\s+/g, ' ');
+    const sizeMatch = fullText.match(/([\d.,]+\s*[KMGT]?B)/i);
+    const extMatch = fullText.match(new RegExp(`\\b(${VALID_EXTS.join('|')})\\b`, 'i'));
+    const yearMatch = fullText.match(/\b(19|20)\d{2}\b/);
     
-    for (let p of parts) {
-      if (p.length > 8 && !/^[\d.,]+\s*[KMGT]?B$/i.test(p) && !VALID_EXTS.includes(p.toLowerCase()) && !/^(19|20)\d{2}$/.test(p)) {
-        title = p; break;
+    if (sizeMatch) size = sizeMatch[0];
+    if (extMatch) ext = extMatch[0].toLowerCase();
+    if (yearMatch) year = yearMatch[0];
+    
+    // Title/Author extraction from lines
+    if (lines.length > 0) {
+      title = lines[0];
+      // Usually the second line is the author if it's not metadata
+      if (lines.length > 1) {
+        const potentialAuthor = lines[1];
+        if (!potentialAuthor.match(/[\d.,]+\s*[KMGT]?B/i) && !VALID_EXTS.includes(potentialAuthor.toLowerCase()) && !/\b(19|20)\d{2}\b/.test(potentialAuthor)) {
+          author = potentialAuthor;
+        }
       }
     }
     
@@ -358,17 +368,19 @@ async function searchLibgen(query) {
     
     const author = cells[1].textContent.trim();
     const titleCell = cells[2];
-    let title = titleCell.textContent.trim().replace(/\s*\[.*?\]\s*$/, "").trim();
+    // Get title specifically from the link inside the title cell
+    const titleLink = titleCell.querySelector('a');
+    let title = titleLink ? titleLink.textContent.trim() : titleCell.textContent.trim();
+    title = title.replace(/\s*\[.*?\]\s*$/, "").trim(); // Clean up trailing brackets
     
     const year = cells[4] ? cells[4].textContent.trim() : "";
     const size = cells[7] ? cells[7].textContent.trim() : "";
     const ext = cells[8] ? cells[8].textContent.trim().toLowerCase() : "";
     
     let md5 = "";
-    const detailLink = titleCell.querySelector('a');
     let detailUrl = "";
-    if (detailLink) {
-      detailUrl = detailLink.getAttribute('href') || "";
+    if (titleLink) {
+      detailUrl = titleLink.getAttribute('href') || "";
       const mm = detailUrl.match(/md5=([a-f0-9]+)/);
       if (mm) md5 = mm[1];
       detailUrl = new URL(detailUrl, mirrors.libgen).href;
@@ -411,10 +423,20 @@ async function searchZlibrary(query) {
     const href = titleEl.getAttribute('href') || "";
     if (!title || !href) return;
     
-    const authorEl = entry.querySelector('.bookAuthor, .authors, a[href*="/author/"], .book-author');
-    const author = authorEl ? authorEl.textContent.trim() : "";
+    // Use innerText for cleaner extraction
+    const text = entry.innerText || entry.textContent;
+    const lines = text.split('\n').map(s => s.trim()).filter(s => s.length > 0);
     
-    const fullText = entry.textContent;
+    let author = "";
+    // Find author line
+    for(let i = 1; i < lines.length; i++) {
+        if(!lines[i].match(/[\d.,]+\s*[KMGT]?B/i) && !VALID_EXTS.includes(lines[i].toLowerCase()) && !/\b(19|20)\d{2}\b/.test(lines[i]) && lines[i].length > 2) {
+            author = lines[i];
+            break;
+        }
+    }
+    
+    const fullText = text.replace(/\s+/g, ' ');
     const ym = fullText.match(/\b(19|20)\d{2}\b/);
     const year = ym ? ym[0] : "";
     const sm = fullText.match(/[\d.]+\s*[KMGT]?B/i);
