@@ -158,21 +158,21 @@ tailwind.config = { darkMode: 'class' }
 
 <!-- Version & Changelog Tooltip -->
 <div class="fixed bottom-4 right-4 z-50 group">
-  <span class="text-xs text-slate-600 cursor-help select-none">v1.6.0</span>
+  <span class="text-xs text-slate-600 cursor-help select-none">v1.7.0</span>
   <div class="absolute bottom-6 right-0 hidden group-hover:block bg-slate-800 border border-slate-700 p-4 rounded-lg shadow-xl w-72 text-xs text-slate-300 transition-opacity duration-200 opacity-0 group-hover:opacity-100">
     <div class="font-bold mb-2 text-slate-100 border-b border-slate-700 pb-2">Changelog</div>
     <ul class="space-y-2">
       <li>
+        <span class="text-indigo-400 font-medium">v1.7.0</span> 
+        <p class="text-slate-400 mt-0.5">Updated proxy list with new fallbacks due to public proxies being blocked by target sites.</p>
+      </li>
+      <li>
         <span class="text-indigo-400 font-medium">v1.6.0</span> 
-        <p class="text-slate-400 mt-0.5">Added Multi-Mirror Failover. If one mirror times out, it automatically tries the next one from FMHY. Increased timeout to 15s.</p>
+        <p class="text-slate-400 mt-0.5">Added Multi-Mirror Failover. If one mirror times out, it automatically tries the next one from FMHY.</p>
       </li>
       <li>
         <span class="text-indigo-400 font-medium">v1.5.0</span> 
         <p class="text-slate-400 mt-0.5">Added book thumbnails! Added "Popular" sort option based on downloads/ratings.</p>
-      </li>
-      <li>
-        <span class="text-indigo-400 font-medium">v1.4.0</span> 
-        <p class="text-slate-400 mt-0.5">Fixed Anna's Archive parser to check parent element for text when link is empty.</p>
       </li>
     </ul>
   </div>
@@ -189,12 +189,13 @@ let currentSort = "relevance";
 let mirrors = { annas: [], zlib: [], libgen: [] };
 let debugLogs = [];
 
+// Updated proxy list
 const CORS_PROXIES = [
+  "https://proxy.cors.sh/",
   "https://corsproxy.io/?url=",
   "https://api.allorigins.win/raw?url=",
   "https://api.codetabs.com/v1/proxy/?quest=",
-  "https://test.cors.workers.dev/?",
-  "https://cors.eu.org/"
+  "https://thingproxy.freeboard.io/fetch/"
 ];
 
 const FMHY_RAW_URL = "https://raw.githubusercontent.com/fmhy/FMHYedit/main/docs/reading.md";
@@ -246,7 +247,6 @@ function extractMirrors(text, siteName) {
     urls.push(m[1]);
   }
   
-  // Filter out github links and sanitize
   urls = urls.filter(u => !u.includes('github.com'));
   return [...new Set(urls.map(u => u.replace(/\/$/, "")))];
 }
@@ -262,7 +262,6 @@ async function initMirrors() {
     mirrors.zlib = extractMirrors(text, "Z-Library");
     mirrors.libgen = extractMirrors(text, "Library Genesis");
 
-    // Fallbacks just in case
     if (mirrors.annas.length === 0) mirrors.annas = ["https://annas-archive.org"];
     if (mirrors.zlib.length === 0) mirrors.zlib = ["https://z-library.sk"];
     if (mirrors.libgen.length === 0) mirrors.libgen = ["https://libgen.is"];
@@ -370,7 +369,7 @@ async function fetchHtml(url) {
   
   for (let proxy of CORS_PROXIES) {
     let proxiedUrl;
-    if (proxy.includes("allorigins") || proxy.includes("corsproxy") || proxy.includes("workers.dev")) {
+    if (proxy.includes("allorigins") || proxy.includes("corsproxy") || proxy.includes("cors.sh")) {
       proxiedUrl = proxy + encodeURIComponent(url);
     } else {
       proxiedUrl = proxy + url;
@@ -378,7 +377,7 @@ async function fetchHtml(url) {
 
     logDebug(`Trying proxy: ${proxy}`);
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
+    const timeoutId = setTimeout(() => controller.abort(), 12000); 
     
     try {
       const resp = await fetch(proxiedUrl, { signal: controller.signal });
@@ -416,7 +415,7 @@ async function searchAnnas(query) {
       const seenMd5 = new Set();
       
       const links = doc.querySelectorAll('a[href*="/md5/"]');
-      if (links.length === 0) continue; // Try next mirror
+      if (links.length === 0) continue; 
       
       links.forEach((a, i) => {
         const href = a.getAttribute('href') || "";
@@ -493,7 +492,7 @@ async function searchLibgen(query) {
       const results = [];
       
       const table = doc.querySelector('table.c') || doc.querySelector('table');
-      if (!table) continue; // Try next mirror
+      if (!table) continue; 
       
       const rows = table.querySelectorAll('tr');
       rows.forEach((row, idx) => {
@@ -558,7 +557,7 @@ async function searchZlibrary(query) {
       
       let entries = doc.querySelectorAll('.resItemBox, .bookRow, [data-book_id], .booklist-row');
       if (entries.length === 0) entries = doc.querySelectorAll('a[href*="/book/"]');
-      if (entries.length === 0) continue; // Try next mirror
+      if (entries.length === 0) continue; 
       
       entries.forEach(entry => {
         let titleEl = entry.querySelector('h3 a, .bookTitle, a[href*="/book/"], .book-title');
