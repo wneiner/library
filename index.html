@@ -96,6 +96,7 @@ tailwind.config = { darkMode: 'class' }
       <span class="text-slate-500 text-xs uppercase tracking-wide">Sort</span>
       <select id="sortBy" class="bg-slate-900 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-slate-300 focus:outline-none focus:ring-1 focus:ring-indigo-500">
         <option value="relevance">Relevance</option>
+        <option value="popular">Popular</option>
         <option value="size_desc">Size ↓</option>
         <option value="size_asc">Size ↑</option>
         <option value="year_desc">Year ↓</option>
@@ -157,21 +158,21 @@ tailwind.config = { darkMode: 'class' }
 
 <!-- Version & Changelog Tooltip -->
 <div class="fixed bottom-4 right-4 z-50 group">
-  <span class="text-xs text-slate-600 cursor-help select-none">v1.4.0</span>
+  <span class="text-xs text-slate-600 cursor-help select-none">v1.5.0</span>
   <div class="absolute bottom-6 right-0 hidden group-hover:block bg-slate-800 border border-slate-700 p-4 rounded-lg shadow-xl w-72 text-xs text-slate-300 transition-opacity duration-200 opacity-0 group-hover:opacity-100">
     <div class="font-bold mb-2 text-slate-100 border-b border-slate-700 pb-2">Changelog</div>
     <ul class="space-y-2">
       <li>
+        <span class="text-indigo-400 font-medium">v1.5.0</span> 
+        <p class="text-slate-400 mt-0.5">Added book thumbnails! Added "Popular" sort option based on downloads/ratings.</p>
+      </li>
+      <li>
         <span class="text-indigo-400 font-medium">v1.4.0</span> 
-        <p class="text-slate-400 mt-0.5">Fixed Anna's Archive parser to check parent element for text when link is empty (image links). Reordered proxies for optimal success.</p>
+        <p class="text-slate-400 mt-0.5">Fixed Anna's Archive parser to check parent element for text when link is empty.</p>
       </li>
       <li>
         <span class="text-indigo-400 font-medium">v1.3.0</span> 
         <p class="text-slate-400 mt-0.5">Fixed Anna's Archive MD5 extraction. Reduced proxy timeout for faster failover.</p>
-      </li>
-      <li>
-        <span class="text-indigo-400 font-medium">v1.2.0</span> 
-        <p class="text-slate-400 mt-0.5">Updated Anna's Archive parser for new layout. Forced LibGen to .is domain.</p>
       </li>
     </ul>
   </div>
@@ -188,7 +189,6 @@ let currentSort = "relevance";
 let mirrors = { annas: "", zlib: "", libgen: "" };
 let debugLogs = [];
 
-// Reordered proxies based on user logs showing corsproxy.io succeeded
 const CORS_PROXIES = [
   "https://corsproxy.io/?url=",
   "https://api.allorigins.win/raw?url=",
@@ -292,6 +292,23 @@ function parseSize(sizeStr) {
   return Math.floor(num * (mult[unit] || 1));
 }
 
+function parsePopularity(text) {
+  // Attempts to find download counts or ratings in text
+  // e.g., "123 downloads", "4.5/5", "12.4K"
+  const dlMatch = text.match(/(\d+(?:\.\d+)?)\s*(K|M)?\s*downloads/i);
+  if (dlMatch) {
+    let num = parseFloat(dlMatch[1]);
+    if (dlMatch[2] === 'K') num *= 1000;
+    if (dlMatch[2] === 'M') num *= 1000000;
+    return num;
+  }
+  const ratingMatch = text.match(/(\d+(?:\.\d+)?)\s*\/\s*5/);
+  if (ratingMatch) {
+    return parseFloat(ratingMatch[1]) * 100; // Weight ratings as 100-500
+  }
+  return 0;
+}
+
 function escapeHtml(s) {
   if (s == null) return "";
   return String(s)
@@ -317,6 +334,9 @@ function deduplicate(results) {
       if (!existing.size && r.size) existing.size = r.size;
       if (!existing.extension && r.extension) existing.extension = r.extension;
       if (!existing.download_url && r.download_url) existing.download_url = r.download_url;
+      if (!existing.cover_url && r.cover_url) existing.cover_url = r.cover_url;
+      // Sum popularity across sources
+      existing.popularity = (existing.popularity || 0) + (r.popularity || 0);
     } else {
       r.sources = [r.source];
       seen[key] = r;
@@ -343,7 +363,7 @@ async function fetchHtml(url) {
 
     logDebug(`Trying proxy: ${proxy}`);
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+    const timeoutId = setTimeout(() => controller.abort(), 10000); 
     
     try {
       const resp = await fetch(proxiedUrl, { signal: controller.signal });
@@ -404,16 +424,17 @@ async function searchAnnas(query) {
       if (seenMd5.has(md5)) return;
       seenMd5.add(md5);
       
-      // Anna's Archive often wraps the cover image in the first <a> tag, which has no text.
-      // If text is empty, fallback to the parent element which contains the full result card.
       let text = a.innerText || a.textContent || "";
       if (text.trim().length === 0 && a.parentElement) {
         text = a.parentElement.innerText || a.parentElement.textContent || "";
       }
       
-      // Log the first link's HTML if text is STILL empty so we can see what's happening
-      if (i === 0 && text.trim().length === 0) {
-        logDebug(`Empty text on first link! HTML: ${a.outerHTML.substring(0, 200)}`);
+      // Extract Cover Image
+      let coverUrl = "";
+      const img = a.parentElement?.querySelector('img') || a.querySelector('img');
+      if (img) {
+        coverUrl = img.getAttribute('src') || img.getAttribute('data-src') || "";
+        if (coverUrl.startsWith("/")) coverUrl = new URL(coverUrl, mirrors.annas).href;
       }
       
       const lines = text.split('\n').map(s => s.trim()).filter(s => s.length > 0);
@@ -441,7 +462,8 @@ async function searchAnnas(query) {
       if (title) {
         results.push({
           title, author: author || "Unknown", year, size, size_bytes: parseSize(size),
-          extension: ext, md5, source: "Anna's Archive",
+          extension: ext, md5, source: "Anna's Archive", popularity: 0, // AA doesn't show downloads
+          cover_url: coverUrl,
           url: new URL(href, mirrors.annas).href,
           download_url: new URL(href, mirrors.annas).href,
         });
@@ -493,6 +515,9 @@ async function searchLibgen(query) {
         detailUrl = new URL(detailUrl, "https://libgen.is").href;
       }
       
+      // Construct LibGen Cover URL
+      let coverUrl = md5 ? `https://libgen.is/covers/${md5}.jpg` : "";
+      
       let downloadUrl = "";
       [9, 10, 11].forEach(i => {
         if (!downloadUrl && cells[i]) {
@@ -503,7 +528,8 @@ async function searchLibgen(query) {
       
       results.push({
         title: title || "Unknown", author: author || "Unknown", year, size,
-        size_bytes: parseSize(size), extension: ext, md5, source: "LibGen",
+        size_bytes: parseSize(size), extension: ext, md5, source: "LibGen", popularity: 0,
+        cover_url: coverUrl,
         url: detailUrl, download_url: downloadUrl
       });
     });
@@ -541,6 +567,14 @@ async function searchZlibrary(query) {
       const href = titleEl.getAttribute('href') || "";
       if (!title || !href) return;
       
+      // Extract Cover Image
+      let coverUrl = "";
+      const img = entry.querySelector('img');
+      if (img) {
+        coverUrl = img.getAttribute('src') || img.getAttribute('data-src') || "";
+        if (coverUrl.startsWith("/")) coverUrl = new URL(coverUrl, mirrors.zlib).href;
+      }
+      
       const text = entry.innerText || entry.textContent;
       const lines = text.split('\n').map(s => s.trim()).filter(s => s.length > 0);
       
@@ -560,13 +594,17 @@ async function searchZlibrary(query) {
       const em = fullText.match(new RegExp(`\\b(${VALID_EXTS.join('|')})\\b`, 'i'));
       const ext = em ? em[0].toLowerCase() : "";
       
+      // Extract Popularity (Downloads/Rating)
+      let popularity = parsePopularity(fullText);
+      
       let md5 = "";
       const mm = href.match(/\/book\/\d+\/([a-f0-9]+)/);
       if (mm) md5 = mm[1];
       
       results.push({
         title, author: author || "Unknown", year, size, size_bytes: parseSize(size),
-        extension: ext, md5, source: "Z-Library",
+        extension: ext, md5, source: "Z-Library", popularity,
+        cover_url: coverUrl,
         url: new URL(href, mirrors.zlib).href,
         download_url: new URL(href, mirrors.zlib).href,
       });
@@ -650,6 +688,7 @@ function getFilteredSorted() {
   }
   const sorters = {
     relevance: (a, b) => (b.relevance || 0) - (a.relevance || 0),
+    popular:   (a, b) => (b.popularity || 0) - (a.popularity || 0),
     size_desc: (a, b) => (b.size_bytes || 0) - (a.size_bytes || 0),
     size_asc:  (a, b) => (a.size_bytes || 0) - (b.size_bytes || 0),
     year_desc: (a, b) => (parseInt(b.year) || 0) - (parseInt(a.year) || 0),
@@ -689,12 +728,20 @@ function renderCard(r) {
 
   const year = r.year ? `<span class="text-slate-500">${escapeHtml(r.year)}</span>` : "";
   const size = r.size ? `<span class="text-slate-500">${escapeHtml(r.size)}</span>` : "";
+  const pop = r.popularity ? `<span class="text-slate-700">·</span><span class="text-amber-400">★ ${escapeHtml(r.popularity)}</span>` : "";
+
+  // Thumbnail with fallback to extension badge
+  const coverHtml = r.cover_url ? `
+    <img src="${escapeAttr(r.cover_url)}" alt="Cover" class="absolute inset-0 w-full h-full object-cover" 
+         onerror="this.style.display='none'">
+  ` : '';
 
   return `
   <div class="group bg-slate-900/60 border border-slate-800 rounded-xl p-4 hover:border-slate-600 transition fade-in">
     <div class="flex items-start gap-4">
-      <div class="flex-shrink-0 w-14 h-16 rounded-lg ${extColor} flex items-center justify-center text-xs font-bold text-white shadow-lg">
-        ${escapeHtml(ext)}
+      <div class="flex-shrink-0 w-14 h-20 rounded-lg ${extColor} flex items-center justify-center text-xs font-bold text-white shadow-lg overflow-hidden relative">
+        ${coverHtml}
+        <span class="z-10 ${r.cover_url ? 'bg-black/50 px-1 py-0.5 rounded m-auto' : ''}">${escapeHtml(ext)}</span>
       </div>
       <div class="flex-1 min-w-0">
         <h3 class="font-medium text-slate-100 leading-snug truncate group-hover:text-indigo-300 transition">
@@ -706,6 +753,7 @@ function renderCard(r) {
           ${size ? `<span class="text-slate-700">·</span>` : ''}
           ${size}
           ${r.md5 ? `<span class="text-slate-700">·</span><span class="text-slate-600 font-mono text-[10px]">${escapeHtml(r.md5.substring(0,8))}…</span>` : ''}
+          ${pop}
         </div>
         <div class="flex flex-wrap gap-1.5 mt-2">${sources}</div>
       </div>
