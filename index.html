@@ -137,6 +137,36 @@ tailwind.config = { darkMode: 'class' }
   Uses public CORS proxies. May be slow or rate-limited.
 </footer>
 
+<!-- Version & Changelog Tooltip -->
+<div class="fixed bottom-4 right-4 z-50 group">
+  <span class="text-xs text-slate-600 cursor-help select-none">v1.0.4</span>
+  <div class="absolute bottom-6 right-0 hidden group-hover:block bg-slate-800 border border-slate-700 p-4 rounded-lg shadow-xl w-72 text-xs text-slate-300 transition-opacity duration-200 opacity-0 group-hover:opacity-100">
+    <div class="font-bold mb-2 text-slate-100 border-b border-slate-700 pb-2">Changelog</div>
+    <ul class="space-y-2">
+      <li>
+        <span class="text-indigo-400 font-medium">v1.0.4</span> 
+        <p class="text-slate-400 mt-0.5">Added version badge & hover changelog. Improved HTML text parsing for better metadata extraction.</p>
+      </li>
+      <li>
+        <span class="text-indigo-400 font-medium">v1.0.3</span> 
+        <p class="text-slate-400 mt-0.5">Improved FMHY regex matching. Optimized proxy fallbacks for GitHub Pages.</p>
+      </li>
+      <li>
+        <span class="text-indigo-400 font-medium">v1.0.2</span> 
+        <p class="text-slate-400 mt-0.5">Removed local file CORS restrictions. Added 12s timeout to prevent infinite hanging.</p>
+      </li>
+      <li>
+        <span class="text-indigo-400 font-medium">v1.0.1</span> 
+        <p class="text-slate-400 mt-0.5">Fixed malformed URL paths (double slashes) causing 403 Forbidden errors.</p>
+      </li>
+      <li>
+        <span class="text-indigo-400 font-medium">v1.0.0</span> 
+        <p class="text-slate-400 mt-0.5">Initial release. FMHY integration, async scraping, deduplication.</p>
+      </li>
+    </ul>
+  </div>
+</div>
+
 <script>
 // ----------------------------------------------------------------
 // State & Config
