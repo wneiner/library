@@ -130,6 +130,24 @@ tailwind.config = { darkMode: 'class' }
     <p class="text-xs mt-4 text-slate-700">Mirror URLs dynamically fetched from FMHY.</p>
   </div>
 
+  <!-- Debug Console -->
+  <div class="mt-12 border-t border-slate-800 pt-6">
+    <details>
+      <summary class="cursor-pointer text-sm text-slate-400 hover:text-slate-200 flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/>
+        </svg>
+        Debug Console
+      </summary>
+      <div class="mt-3 relative">
+        <textarea id="debugConsole" readonly class="w-full h-64 bg-slate-900 text-slate-400 text-xs font-mono p-3 rounded-lg border border-slate-800 resize-y focus:outline-none"></textarea>
+        <button id="copyLogsBtn" class="absolute top-2 right-2 bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs px-2 py-1 rounded transition">
+          Copy Logs
+        </button>
+      </div>
+    </details>
+  </div>
+
 </main>
 
 <footer class="border-t border-slate-800/60 mt-12 py-6 text-center text-xs text-slate-600">
@@ -139,10 +157,14 @@ tailwind.config = { darkMode: 'class' }
 
 <!-- Version & Changelog Tooltip -->
 <div class="fixed bottom-4 right-4 z-50 group">
-  <span class="text-xs text-slate-600 cursor-help select-none">v1.0.4</span>
+  <span class="text-xs text-slate-600 cursor-help select-none">v1.1.0</span>
   <div class="absolute bottom-6 right-0 hidden group-hover:block bg-slate-800 border border-slate-700 p-4 rounded-lg shadow-xl w-72 text-xs text-slate-300 transition-opacity duration-200 opacity-0 group-hover:opacity-100">
     <div class="font-bold mb-2 text-slate-100 border-b border-slate-700 pb-2">Changelog</div>
     <ul class="space-y-2">
+      <li>
+        <span class="text-indigo-400 font-medium">v1.1.0</span> 
+        <p class="text-slate-400 mt-0.5">Added Debug Console for logging proxy and fetch errors. Added more proxy fallbacks.</p>
+      </li>
       <li>
         <span class="text-indigo-400 font-medium">v1.0.4</span> 
         <p class="text-slate-400 mt-0.5">Added version badge & hover changelog. Improved HTML text parsing for better metadata extraction.</p>
@@ -176,12 +198,14 @@ let activeSources = new Set(["Anna's Archive", "LibGen", "Z-Library"]);
 let currentExt = "";
 let currentSort = "relevance";
 let mirrors = { annas: "", zlib: "", libgen: "" };
+let debugLogs = [];
 
 // Public CORS proxies. corsproxy.io works well on GitHub Pages.
 const CORS_PROXIES = [
   "https://corsproxy.io/?url=",
   "https://api.allorigins.win/raw?url=",
-  "https://api.codetabs.com/v1/proxy/?quest="
+  "https://cors.eu.org/",
+  "https://thingproxy.freeboard.io/fetch/"
 ];
 
 const FMHY_RAW_URL = "https://raw.githubusercontent.com/fmhy/FMHYedit/main/docs/reading.md";
@@ -193,6 +217,7 @@ const filterBar = $("#filterBar");
 const skeletonEl = $("#skeletons");
 const errorBar = $("#errorBar");
 const countEl = $("#resultCount");
+const debugEl = $("#debugConsole");
 
 const SRC_DOT = {
   "Anna's Archive": "bg-emerald-400",
@@ -202,13 +227,30 @@ const SRC_DOT = {
 
 const VALID_EXTS = ["pdf", "epub", "mobi", "azw", "azw3", "djvu", "txt", "fb2", "rtf", "doc", "docx"];
 
+// Debug Logger
+function logDebug(msg) {
+  const time = new Date().toLocaleTimeString();
+  const entry = `[${time}] ${msg}`;
+  debugLogs.push(entry);
+  debugEl.value = debugLogs.join('\n');
+  debugEl.scrollTop = debugEl.scrollHeight;
+}
+
+ $("#copyLogsBtn").addEventListener("click", () => {
+  debugEl.select();
+  document.execCommand("copy");
+  alert("Logs copied to clipboard!");
+});
+
 // ----------------------------------------------------------------
 // Initialization: Fetch mirrors from FMHY
 // ----------------------------------------------------------------
 async function initMirrors() {
+  logDebug("Fetching FMHY list from GitHub...");
   try {
     const resp = await fetch(FMHY_RAW_URL);
     const text = await resp.text();
+    logDebug(`FMHY list fetched (${text.length} chars).`);
     
     // More robust regex to find URLs in markdown
     const annasMatch = text.match(/\[Anna's Archive\]\((https?:\/\/[^)]+)\)/i);
@@ -222,6 +264,8 @@ async function initMirrors() {
       libgen: libgenMatch ? libgenMatch[1].replace(/\/$/, "") : "https://libgen.is"
     };
 
+    logDebug(`Extracted Mirrors -> Annas: ${mirrors.annas} | Zlib: ${mirrors.zlib} | LibGen: ${mirrors.libgen}`);
+
     $("#fmhyDot").classList.remove("bg-amber-400", "animate-pulse");
     $("#fmhyDot").classList.add("bg-emerald-400");
     $("#fmhyStatus").textContent = "FMHY Connected";
@@ -231,7 +275,7 @@ async function initMirrors() {
     $("#searchInput").focus();
     
   } catch (e) {
-    console.error("Failed to fetch FMHY list", e);
+    logDebug(`FMHY fetch FAILED: ${e.message}`);
     $("#fmhyDot").classList.remove("bg-amber-400", "animate-pulse");
     $("#fmhyDot").classList.add("bg-rose-400");
     $("#fmhyStatus").textContent = "FMHY Failed (using fallback)";
@@ -299,6 +343,7 @@ function deduplicate(results) {
 // Scrapers (using DOMParser with Fallback Proxies)
 // ----------------------------------------------------------------
 async function fetchHtml(url) {
+  logDebug(`Fetching URL: ${url}`);
   let lastError = null;
   
   for (let proxy of CORS_PROXIES) {
@@ -310,182 +355,216 @@ async function fetchHtml(url) {
       proxiedUrl = proxy + url;
     }
 
+    logDebug(`Trying proxy: ${proxy}`);
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 12000); // 12s timeout
     
     try {
       const resp = await fetch(proxiedUrl, { signal: controller.signal });
       clearTimeout(timeoutId);
+      logDebug(`Proxy responded with Status: ${resp.status}`);
+      
       if (resp.ok) {
         const html = await resp.text();
         // Check for Cloudflare challenges or error pages
         if (html && html.length > 50 && !html.includes("Just a moment...") && !html.includes("403 Forbidden")) {
+          logDebug(`Valid HTML received (${html.length} chars).`);
           return new DOMParser().parseFromString(html, "text/html");
+        } else {
+          logDebug(`HTML rejected (Cloudflare/Error). Snippet: ${html.substring(0, 100).replace(/\n/g, ' ')}`);
         }
+      } else {
+        const errText = await resp.text();
+        logDebug(`Fetch not OK. Status: ${resp.status}. Response: ${errText.substring(0, 100).replace(/\n/g, ' ')}`);
       }
     } catch (e) {
       clearTimeout(timeoutId);
       lastError = e;
+      logDebug(`Fetch exception: ${e.message}`);
     }
   }
+  logDebug(`All proxies failed for ${url}`);
   throw new Error(`All proxies failed. Last error: ${lastError?.message || 'Unknown'}`);
 }
 
 async function searchAnnas(query) {
-  const doc = await fetchHtml(`${mirrors.annas}/search?q=${encodeURIComponent(query)}`);
-  const results = [];
-  const seenMd5 = new Set();
-  
-  doc.querySelectorAll('a[href*="/md5/"]').forEach(a => {
-    const href = a.getAttribute('href') || "";
-    const m = href.match(/\/md5\/([a-f0-9]+)/);
-    if (!m) return;
-    const md5 = m[1];
-    if (seenMd5.has(md5)) return;
-    seenMd5.add(md5);
+  try {
+    const doc = await fetchHtml(`${mirrors.annas}/search?q=${encodeURIComponent(query)}`);
+    const results = [];
+    const seenMd5 = new Set();
     
-    // Use innerText to get a clean, line-by-line representation of the result card
-    const text = a.innerText || a.textContent;
-    const lines = text.split('\n').map(s => s.trim()).filter(s => s.length > 0);
-    
-    let size = "", ext = "", year = "", title = "", author = "";
-    
-    // Metadata extraction from the full text block
-    const fullText = text.replace(/\s+/g, ' ');
-    const sizeMatch = fullText.match(/([\d.,]+\s*[KMGT]?B)/i);
-    const extMatch = fullText.match(new RegExp(`\\b(${VALID_EXTS.join('|')})\\b`, 'i'));
-    const yearMatch = fullText.match(/\b(19|20)\d{2}\b/);
-    
-    if (sizeMatch) size = sizeMatch[0];
-    if (extMatch) ext = extMatch[0].toLowerCase();
-    if (yearMatch) year = yearMatch[0];
-    
-    // Title/Author extraction from lines
-    if (lines.length > 0) {
-      title = lines[0];
-      // Usually the second line is the author if it's not metadata
-      if (lines.length > 1) {
-        const potentialAuthor = lines[1];
-        if (!potentialAuthor.match(/[\d.,]+\s*[KMGT]?B/i) && !VALID_EXTS.includes(potentialAuthor.toLowerCase()) && !/\b(19|20)\d{2}\b/.test(potentialAuthor)) {
-          author = potentialAuthor;
+    doc.querySelectorAll('a[href*="/md5/"]').forEach(a => {
+      const href = a.getAttribute('href') || "";
+      const m = href.match(/\/md5\/([a-f0-9]+)/);
+      if (!m) return;
+      const md5 = m[1];
+      if (seenMd5.has(md5)) return;
+      seenMd5.add(md5);
+      
+      const text = a.innerText || a.textContent;
+      const lines = text.split('\n').map(s => s.trim()).filter(s => s.length > 0);
+      
+      let size = "", ext = "", year = "", title = "", author = "";
+      const fullText = text.replace(/\s+/g, ' ');
+      const sizeMatch = fullText.match(/([\d.,]+\s*[KMGT]?B)/i);
+      const extMatch = fullText.match(new RegExp(`\\b(${VALID_EXTS.join('|')})\\b`, 'i'));
+      const yearMatch = fullText.match(/\b(19|20)\d{2}\b/);
+      
+      if (sizeMatch) size = sizeMatch[0];
+      if (extMatch) ext = extMatch[0].toLowerCase();
+      if (yearMatch) year = yearMatch[0];
+      
+      if (lines.length > 0) {
+        title = lines[0];
+        if (lines.length > 1) {
+          const potentialAuthor = lines[1];
+          if (!potentialAuthor.match(/[\d.,]+\s*[KMGT]?B/i) && !VALID_EXTS.includes(potentialAuthor.toLowerCase()) && !/\b(19|20)\d{2}\b/.test(potentialAuthor)) {
+            author = potentialAuthor;
+          }
         }
       }
-    }
-    
-    if (title) {
-      results.push({
-        title, author: author || "Unknown", year, size, size_bytes: parseSize(size),
-        extension: ext, md5, source: "Anna's Archive",
-        url: new URL(href, mirrors.annas).href,
-        download_url: new URL(href, mirrors.annas).href,
-      });
-    }
-  });
-  return results;
+      
+      if (title) {
+        results.push({
+          title, author: author || "Unknown", year, size, size_bytes: parseSize(size),
+          extension: ext, md5, source: "Anna's Archive",
+          url: new URL(href, mirrors.annas).href,
+          download_url: new URL(href, mirrors.annas).href,
+        });
+      }
+    });
+    logDebug(`Anna's Archive found ${results.length} results.`);
+    return results;
+  } catch (e) {
+    logDebug(`Anna's Archive scraper error: ${e.message}`);
+    throw e;
+  }
 }
 
 async function searchLibgen(query) {
-  const doc = await fetchHtml(`${mirrors.libgen}/search.php?req=${encodeURIComponent(query)}&open=0&res=50&view=simple&phrase=1&column=def`);
-  const results = [];
-  const table = doc.querySelector('table.c') || doc.querySelector('table');
-  if (!table) return results;
-  
-  const rows = table.querySelectorAll('tr');
-  rows.forEach((row, idx) => {
-    if (idx === 0) return; // skip header
-    const cells = row.querySelectorAll('td');
-    if (cells.length < 9) return;
-    
-    const author = cells[1].textContent.trim();
-    const titleCell = cells[2];
-    // Get title specifically from the link inside the title cell
-    const titleLink = titleCell.querySelector('a');
-    let title = titleLink ? titleLink.textContent.trim() : titleCell.textContent.trim();
-    title = title.replace(/\s*\[.*?\]\s*$/, "").trim(); // Clean up trailing brackets
-    
-    const year = cells[4] ? cells[4].textContent.trim() : "";
-    const size = cells[7] ? cells[7].textContent.trim() : "";
-    const ext = cells[8] ? cells[8].textContent.trim().toLowerCase() : "";
-    
-    let md5 = "";
-    let detailUrl = "";
-    if (titleLink) {
-      detailUrl = titleLink.getAttribute('href') || "";
-      const mm = detailUrl.match(/md5=([a-f0-9]+)/);
-      if (mm) md5 = mm[1];
-      detailUrl = new URL(detailUrl, mirrors.libgen).href;
+  try {
+    // Try primary URL, fallback to .is if .li fails
+    let url = `${mirrors.libgen}/search.php?req=${encodeURIComponent(query)}&open=0&res=50&view=simple&phrase=1&column=def`;
+    let doc;
+    try {
+      doc = await fetchHtml(url);
+    } catch (e1) {
+      logDebug(`Primary LibGen failed, trying libgen.is fallback...`);
+      url = `https://libgen.is/search.php?req=${encodeURIComponent(query)}&open=0&res=50&view=simple&phrase=1&column=def`;
+      doc = await fetchHtml(url);
+    }
+
+    const results = [];
+    const table = doc.querySelector('table.c') || doc.querySelector('table');
+    if (!table) {
+      logDebug("LibGen: Could not find results table.");
+      return results;
     }
     
-    let downloadUrl = "";
-    [9, 10, 11].forEach(i => {
-      if (!downloadUrl && cells[i]) {
-        const a = cells[i].querySelector('a');
-        if (a && a.getAttribute('href')) downloadUrl = new URL(a.getAttribute('href'), mirrors.libgen).href;
+    const rows = table.querySelectorAll('tr');
+    rows.forEach((row, idx) => {
+      if (idx === 0) return; 
+      const cells = row.querySelectorAll('td');
+      if (cells.length < 9) return;
+      
+      const author = cells[1].textContent.trim();
+      const titleCell = cells[2];
+      const titleLink = titleCell.querySelector('a');
+      let title = titleLink ? titleLink.textContent.trim() : titleCell.textContent.trim();
+      title = title.replace(/\s*\[.*?\]\s*$/, "").trim();
+      
+      const year = cells[4] ? cells[4].textContent.trim() : "";
+      const size = cells[7] ? cells[7].textContent.trim() : "";
+      const ext = cells[8] ? cells[8].textContent.trim().toLowerCase() : "";
+      
+      let md5 = "";
+      let detailUrl = "";
+      if (titleLink) {
+        detailUrl = titleLink.getAttribute('href') || "";
+        const mm = detailUrl.match(/md5=([a-f0-9]+)/);
+        if (mm) md5 = mm[1];
+        detailUrl = new URL(detailUrl, mirrors.libgen).href;
       }
+      
+      let downloadUrl = "";
+      [9, 10, 11].forEach(i => {
+        if (!downloadUrl && cells[i]) {
+          const a = cells[i].querySelector('a');
+          if (a && a.getAttribute('href')) downloadUrl = new URL(a.getAttribute('href'), mirrors.libgen).href;
+        }
+      });
+      
+      results.push({
+        title: title || "Unknown", author: author || "Unknown", year, size,
+        size_bytes: parseSize(size), extension: ext, md5, source: "LibGen",
+        url: detailUrl, download_url: downloadUrl
+      });
     });
-    
-    results.push({
-      title: title || "Unknown", author: author || "Unknown", year, size,
-      size_bytes: parseSize(size), extension: ext, md5, source: "LibGen",
-      url: detailUrl, download_url: downloadUrl
-    });
-  });
-  return results;
+    logDebug(`LibGen found ${results.length} results.`);
+    return results;
+  } catch (e) {
+    logDebug(`LibGen scraper error: ${e.message}`);
+    throw e;
+  }
 }
 
 async function searchZlibrary(query) {
-  const doc = await fetchHtml(`${mirrors.zlib}/s/${encodeURIComponent(query)}`);
-  const results = [];
-  
-  let entries = doc.querySelectorAll('.resItemBox, .bookRow, [data-book_id], .booklist-row');
-  if (entries.length === 0) {
-    entries = doc.querySelectorAll('a[href*="/book/"]');
-  }
-  
-  entries.forEach(entry => {
-    let titleEl = entry.querySelector('h3 a, .bookTitle, a[href*="/book/"], .book-title');
-    if (!titleEl && entry.tagName === 'A' && entry.getAttribute('href')?.includes('/book/')) {
-      titleEl = entry;
-    }
-    if (!titleEl) return;
+  try {
+    const doc = await fetchHtml(`${mirrors.zlib}/s/${encodeURIComponent(query)}`);
+    const results = [];
     
-    const title = titleEl.textContent.trim();
-    const href = titleEl.getAttribute('href') || "";
-    if (!title || !href) return;
-    
-    // Use innerText for cleaner extraction
-    const text = entry.innerText || entry.textContent;
-    const lines = text.split('\n').map(s => s.trim()).filter(s => s.length > 0);
-    
-    let author = "";
-    // Find author line
-    for(let i = 1; i < lines.length; i++) {
-        if(!lines[i].match(/[\d.,]+\s*[KMGT]?B/i) && !VALID_EXTS.includes(lines[i].toLowerCase()) && !/\b(19|20)\d{2}\b/.test(lines[i]) && lines[i].length > 2) {
-            author = lines[i];
-            break;
-        }
+    let entries = doc.querySelectorAll('.resItemBox, .bookRow, [data-book_id], .booklist-row');
+    if (entries.length === 0) {
+      entries = doc.querySelectorAll('a[href*="/book/"]');
     }
     
-    const fullText = text.replace(/\s+/g, ' ');
-    const ym = fullText.match(/\b(19|20)\d{2}\b/);
-    const year = ym ? ym[0] : "";
-    const sm = fullText.match(/[\d.]+\s*[KMGT]?B/i);
-    const size = sm ? sm[0] : "";
-    const em = fullText.match(new RegExp(`\\b(${VALID_EXTS.join('|')})\\b`, 'i'));
-    const ext = em ? em[0].toLowerCase() : "";
-    
-    let md5 = "";
-    const mm = href.match(/\/book\/\d+\/([a-f0-9]+)/);
-    if (mm) md5 = mm[1];
-    
-    results.push({
-      title, author: author || "Unknown", year, size, size_bytes: parseSize(size),
-      extension: ext, md5, source: "Z-Library",
-      url: new URL(href, mirrors.zlib).href,
-      download_url: new URL(href, mirrors.zlib).href,
+    entries.forEach(entry => {
+      let titleEl = entry.querySelector('h3 a, .bookTitle, a[href*="/book/"], .book-title');
+      if (!titleEl && entry.tagName === 'A' && entry.getAttribute('href')?.includes('/book/')) {
+        titleEl = entry;
+      }
+      if (!titleEl) return;
+      
+      const title = titleEl.textContent.trim();
+      const href = titleEl.getAttribute('href') || "";
+      if (!title || !href) return;
+      
+      const text = entry.innerText || entry.textContent;
+      const lines = text.split('\n').map(s => s.trim()).filter(s => s.length > 0);
+      
+      let author = "";
+      for(let i = 1; i < lines.length; i++) {
+          if(!lines[i].match(/[\d.,]+\s*[KMGT]?B/i) && !VALID_EXTS.includes(lines[i].toLowerCase()) && !/\b(19|20)\d{2}\b/.test(lines[i]) && lines[i].length > 2) {
+              author = lines[i];
+              break;
+          }
+      }
+      
+      const fullText = text.replace(/\s+/g, ' ');
+      const ym = fullText.match(/\b(19|20)\d{2}\b/);
+      const year = ym ? ym[0] : "";
+      const sm = fullText.match(/[\d.]+\s*[KMGT]?B/i);
+      const size = sm ? sm[0] : "";
+      const em = fullText.match(new RegExp(`\\b(${VALID_EXTS.join('|')})\\b`, 'i'));
+      const ext = em ? em[0].toLowerCase() : "";
+      
+      let md5 = "";
+      const mm = href.match(/\/book\/\d+\/([a-f0-9]+)/);
+      if (mm) md5 = mm[1];
+      
+      results.push({
+        title, author: author || "Unknown", year, size, size_bytes: parseSize(size),
+        extension: ext, md5, source: "Z-Library",
+        url: new URL(href, mirrors.zlib).href,
+        download_url: new URL(href, mirrors.zlib).href,
+      });
     });
-  });
-  return results;
+    logDebug(`Z-Library found ${results.length} results.`);
+    return results;
+  } catch (e) {
+    logDebug(`Z-Library scraper error: ${e.message}`);
+    throw e;
+  }
 }
 
 // ----------------------------------------------------------------
@@ -505,6 +584,7 @@ async function doSearch(q) {
   q = q.trim();
   if (!q) return;
 
+  logDebug(`--- Starting Search for: "${q}" ---`);
   resultsEl.innerHTML = "";
   emptyEl.classList.add("hidden");
   filterBar.classList.add("hidden");
@@ -517,7 +597,6 @@ async function doSearch(q) {
     { name: "Z-Library", fn: searchZlibrary }
   ];
 
-  // Run all concurrently, catch individual errors
   const settled = await Promise.allSettled(scrapers.map(s => s.fn(q)));
   
   let allResultsRaw = [];
@@ -536,6 +615,7 @@ async function doSearch(q) {
   });
 
   allResults = deduplicate(allResultsRaw);
+  logDebug(`Total raw results: ${allResultsRaw.length}. Deduplicated: ${allResults.length}.`);
   
   allResults.forEach((r, i) => {
     r.relevance = (r.sources?.length || 1) * 1000 - i;
@@ -681,7 +761,7 @@ document.querySelectorAll(".src-toggle").forEach(btn => {
   btn.addEventListener("click", () => {
     const src = btn.dataset.source;
     if (activeSources.has(src)) {
-      if (activeSources.size === 1) return; // keep at least one
+      if (activeSources.size === 1) return; 
       activeSources.delete(src);
       btn.classList.add("opacity-40");
     } else {
@@ -702,7 +782,6 @@ document.querySelectorAll(".src-toggle").forEach(btn => {
   render();
 });
 
-// Start initialization on load
 window.addEventListener("load", initMirrors);
 </script>
 </body>
