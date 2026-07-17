@@ -157,21 +157,21 @@ tailwind.config = { darkMode: 'class' }
 
 <!-- Version & Changelog Tooltip -->
 <div class="fixed bottom-4 right-4 z-50 group">
-  <span class="text-xs text-slate-600 cursor-help select-none">v1.2.0</span>
+  <span class="text-xs text-slate-600 cursor-help select-none">v1.3.0</span>
   <div class="absolute bottom-6 right-0 hidden group-hover:block bg-slate-800 border border-slate-700 p-4 rounded-lg shadow-xl w-72 text-xs text-slate-300 transition-opacity duration-200 opacity-0 group-hover:opacity-100">
     <div class="font-bold mb-2 text-slate-100 border-b border-slate-700 pb-2">Changelog</div>
     <ul class="space-y-2">
       <li>
+        <span class="text-indigo-400 font-medium">v1.3.0</span> 
+        <p class="text-slate-400 mt-0.5">Fixed Anna's Archive MD5 extraction. Reduced proxy timeout for faster failover. Reordered proxies.</p>
+      </li>
+      <li>
         <span class="text-indigo-400 font-medium">v1.2.0</span> 
-        <p class="text-slate-400 mt-0.5">Fixed Anna's Archive HTML parser for new layout. Reordered proxies. Forced LibGen to .is domain.</p>
+        <p class="text-slate-400 mt-0.5">Updated Anna's Archive parser for new layout. Forced LibGen to .is domain.</p>
       </li>
       <li>
         <span class="text-indigo-400 font-medium">v1.1.0</span> 
         <p class="text-slate-400 mt-0.5">Added Debug Console for logging proxy and fetch errors. Added more proxy fallbacks.</p>
-      </li>
-      <li>
-        <span class="text-indigo-400 font-medium">v1.0.4</span> 
-        <p class="text-slate-400 mt-0.5">Added version badge & hover changelog. Improved HTML text parsing for better metadata extraction.</p>
       </li>
     </ul>
   </div>
@@ -188,12 +188,12 @@ let currentSort = "relevance";
 let mirrors = { annas: "", zlib: "", libgen: "" };
 let debugLogs = [];
 
-// Reordered proxies based on user logs showing allorigins was most successful
+// Reordered proxies and reduced timeout for faster failover
 const CORS_PROXIES = [
   "https://api.allorigins.win/raw?url=",
+  "https://api.codetabs.com/v1/proxy/?quest=",
   "https://corsproxy.io/?url=",
-  "https://cors.eu.org/",
-  "https://thingproxy.freeboard.io/fetch/"
+  "https://cors.eu.org/"
 ];
 
 const FMHY_RAW_URL = "https://raw.githubusercontent.com/fmhy/FMHYedit/main/docs/reading.md";
@@ -247,11 +247,10 @@ async function initMirrors() {
     mirrors = {
       annas: annasMatch ? annasMatch[1].replace(/\/$/, "") : "https://annas-archive.org",
       zlib: zlibMatch ? zlibMatch[1].replace(/\/$/, "") : "https://z-library.sk",
-      // Force .is for LibGen as .li is blocking proxies heavily right now
       libgen: "https://libgen.is"
     };
 
-    logDebug(`Extracted Mirrors -> Annas: ${mirrors.annas} | Zlib: ${mirrors.zlib} | LibGen: ${mirrors.libgen} (forced .is)`);
+    logDebug(`Extracted Mirrors -> Annas: ${mirrors.annas} | Zlib: ${mirrors.zlib} | LibGen: ${mirrors.libgen}`);
 
     $("#fmhyDot").classList.remove("bg-amber-400", "animate-pulse");
     $("#fmhyDot").classList.add("bg-emerald-400");
@@ -343,7 +342,7 @@ async function fetchHtml(url) {
 
     logDebug(`Trying proxy: ${proxy}`);
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 12000); 
+    const timeoutId = setTimeout(() => controller.abort(), 8000); // Reduced to 8s timeout
     
     try {
       const resp = await fetch(proxiedUrl, { signal: controller.signal });
@@ -378,21 +377,31 @@ async function searchAnnas(query) {
     const results = [];
     const seenMd5 = new Set();
     
-    // Anna's Archive updated their HTML. Links are usually inside divs.
-    // We look for any anchor tag pointing to /md5/
     const links = doc.querySelectorAll('a[href*="/md5/"]');
     logDebug(`Anna's Archive: Found ${links.length} links.`);
     
-    if (links.length === 0) {
-      // Log a snippet to see what we actually received
-      logDebug(`HTML Snippet: ${doc.body.innerHTML.substring(0, 500).replace(/\n/g, ' ')}`);
+    if (links.length > 0) {
+      let sampleHrefs = [];
+      links.forEach((a, i) => {
+        if (i < 3) sampleHrefs.push(a.getAttribute('href'));
+      });
+      logDebug(`Sample hrefs: ${sampleHrefs.join(' | ')}`);
     }
     
     links.forEach(a => {
       const href = a.getAttribute('href') || "";
-      const m = href.match(/\/md5\/([a-f0-9]+)/);
-      if (!m) return;
-      const md5 = m[1];
+      
+      // More robust MD5 extraction using string split
+      let md5 = "";
+      if (href.includes("/md5/")) {
+        const parts = href.split("/md5/");
+        if (parts.length > 1) {
+          // Get the first segment after /md5/, ignoring query params or fragments
+          md5 = parts[1].split(/[/?#]/)[0];
+        }
+      }
+      
+      if (!md5) return;
       if (seenMd5.has(md5)) return;
       seenMd5.add(md5);
       
@@ -438,7 +447,6 @@ async function searchAnnas(query) {
 
 async function searchLibgen(query) {
   try {
-    // Using libgen.is directly as it's more proxy-friendly
     let url = `https://libgen.is/search.php?req=${encodeURIComponent(query)}&open=0&res=50&view=simple&phrase=1&column=def`;
     let doc = await fetchHtml(url);
 
